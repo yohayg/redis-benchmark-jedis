@@ -4,79 +4,58 @@ import java.util.concurrent.*;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 
-/**
- *
- * @author abhishekk
- */
-public class PausableThreadPoolExecutor extends ThreadPoolExecutor
-{
+
+public class PausableThreadPoolExecutor extends ThreadPoolExecutor {
 
     private boolean isPaused;
     private ReentrantLock pauseLock = new ReentrantLock();
     private Condition unpaused = pauseLock.newCondition();
 
-    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables)
-    {
+    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables) {
         super(i, i1, l, timeUnit, runnables);
     }
 
-    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables, ThreadFactory threadFactory)
-    {
+    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables, ThreadFactory threadFactory) {
         super(i, i1, l, timeUnit, runnables, threadFactory);
     }
 
-    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables, RejectedExecutionHandler rejectedExecutionHandler)
-    {
+    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables, RejectedExecutionHandler rejectedExecutionHandler) {
         super(i, i1, l, timeUnit, runnables, rejectedExecutionHandler);
     }
 
-    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables, ThreadFactory threadFactory, RejectedExecutionHandler rejectedExecutionHandler)
-    {
+    public PausableThreadPoolExecutor(int i, int i1, long l, TimeUnit timeUnit, BlockingQueue<Runnable> runnables, ThreadFactory threadFactory, RejectedExecutionHandler rejectedExecutionHandler) {
         super(i, i1, l, timeUnit, runnables, threadFactory, rejectedExecutionHandler);
     }
 
 
-    protected void beforeExecute(Thread t, Runnable r)
-    {
+    @Override
+    protected void beforeExecute(Thread t, Runnable r) {
         super.beforeExecute(t, r);
         pauseLock.lock();
-        try
-        {
+        try {
             while (isPaused) unpaused.await();
-        }
-        catch (InterruptedException ie)
-        {
+        } catch (InterruptedException ie) {
             t.interrupt();
-        }
-        finally
-        {
+        } finally {
             pauseLock.unlock();
         }
     }
 
-    public void pause()
-    {
+    public void pause() {
         pauseLock.lock();
-        try
-        {
+        try {
             isPaused = true;
-        }
-        finally
-        {
+        } finally {
             pauseLock.unlock();
         }
     }
 
-    public void resume()
-    {
+    public void resume() {
         pauseLock.lock();
-        try
-        {
+        try {
             isPaused = false;
             unpaused.signalAll();
-        }
-        finally
-        {
+        } finally {
             pauseLock.unlock();
         }
     }

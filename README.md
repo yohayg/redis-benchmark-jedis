@@ -13,9 +13,12 @@ The program assumes defaults for all the values, which can be changed by using t
 -  -c : number of Jedis connections. Default is 1.
 -  -h : Host on which redis is running. Default is "localhost".
 -  -p : Redis port. Default is 6379.
--  s  : Data size to be performed on the set operation. (currently only performs the set operation).
+-  -sentinel : 0 to use sentinel pool, 1 for not using sentinel pool
+-  -s  : Data size to be performed on the set operation. (currently only performs the set operation).
 
 
 ##TODO
 - Currently only performs the set operations. Need to extend it to perform all opeartions supported by Jedis.
 
+Example:
+<code>java -jar jedis-benchmark-1.0-jar-with-dependencies.jar  -h <host> -p 14945 -a <auth-token> -sentinel 1 -n 10 -c 2 -s 3000</code>

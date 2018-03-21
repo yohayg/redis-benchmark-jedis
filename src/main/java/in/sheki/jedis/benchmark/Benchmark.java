@@ -2,73 +2,90 @@ package in.sheki.jedis.benchmark;
 
 import com.beust.jcommander.JCommander;
 import org.apache.commons.lang.RandomStringUtils;
-import org.apache.commons.pool.impl.GenericObjectPool;
+import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPool;
+import redis.clients.jedis.JedisSentinelPool;
+import redis.clients.util.Pool;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
-
-/**
- * @author abhishekk
- */
-public class Benchmark
-{
+import java.util.*;
+import java.util.concurrent.*;
 
 
-    private final int noOps_;
-    private final LinkedBlockingQueue<Long> setRunTimes = new LinkedBlockingQueue<Long>();
-    private PausableThreadPoolExecutor executor;
-    private final JedisPool pool;
+public class Benchmark {
+
+
+    private final int numberOfOperations;
+    private final BlockingQueue<Long> setRunTimes;
+    private final Pool<Jedis> pool;
+    private final String auth;
     private final String data;
     private final CountDownLatch shutDownLatch;
+    private PausableThreadPoolExecutor executor;
+    private BlockingQueue<String> queue;
     private long totalNanoRunTime;
 
-
-    public Benchmark(final int noOps, final int noThreads, final int noJedisConn, final String host, final int port, int dataSize)
-    {
-        this.noOps_ = noOps;
+    public Benchmark(final int noOps, final int noThreads, final int noJedisConn, final String host, final int port, int dataSize, int sentinel, String auth, BlockingQueue<String> queue) {
+        this.auth = auth;
+        this.numberOfOperations = noOps;
+        setRunTimes = new ArrayBlockingQueue<>(noOps);
         this.executor = new PausableThreadPoolExecutor(noThreads, noThreads, 5, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
-        final GenericObjectPool.Config poolConfig = new GenericObjectPool.Config();
-        poolConfig.testOnBorrow = true;
-        poolConfig.testOnReturn = true;
-        poolConfig.maxActive = noJedisConn;
-        this.pool = new JedisPool(poolConfig, host, port);
+        this.queue = queue;
+
+        if (sentinel == 0) {
+            final GenericObjectPoolConfig poolConfig = new GenericObjectPoolConfig();
+            poolConfig.setTestOnBorrow(true);
+            poolConfig.setTestOnReturn(true);
+            poolConfig.setMaxTotal(noJedisConn);
+            Set<String> sentinels = new HashSet<>();
+            sentinels.add(host + ":" + port);
+            this.pool = new JedisSentinelPool("rtpmaster", sentinels, poolConfig);
+        } else {
+            this.pool = new JedisPool(host, port);
+        }
         this.data = RandomStringUtils.random(dataSize);
         shutDownLatch = new CountDownLatch(noOps);
 
     }
 
-    class SetTask implements Runnable
-    {
-        private CountDownLatch latch_;
-
-        SetTask(CountDownLatch latch)
-        {
-            this.latch_ = latch;
-        }
-
-        public void run()
-        {
-            long startTime = System.nanoTime();
-            Jedis jedis = pool.getResource();
-            jedis.set(RandomStringUtils.random(15), data);
-            setRunTimes.offer(System.nanoTime() - startTime);
-            pool.returnResource(jedis);
-            latch_.countDown();
-        }
+    public static void main(String[] args) throws InterruptedException {
+        System.out.println("Starting");
+        CommandLineArgs cla = getCommandLineArgs(args);
+        BlockingQueue<String> queue = new ArrayBlockingQueue<>(cla.noOps);
+        start(cla, 0, queue);
     }
 
-    public void performBenchmark() throws InterruptedException
-    {
+    public static CommandLineArgs getCommandLineArgs(String[] args) {
+        CommandLineArgs cla = new CommandLineArgs();
+        new JCommander(cla, args);
+        System.out.println(cla.toString());
+        return cla;
+    }
+
+    private static void start(CommandLineArgs cla, int type, BlockingQueue<String> queue) throws InterruptedException {
+        Benchmark benchmark = new Benchmark(cla.noOps, cla.noThreads, cla.noConnections, cla.host, cla.port, cla.dataSize, cla.sentinel, cla.auth, queue);
+        benchmark.test();
+        System.out.println("In progress");
+        benchmark.performBenchmark(type);
+        System.out.println("Done");
+        benchmark.printStats();
+    }
+
+    public void test() {
+        System.out.println("Testing Connection");
+        Jedis jedis = pool.getResource();
+        if (!auth.isEmpty()) {
+            jedis.auth(auth);
+        }
+        jedis.set(RandomStringUtils.random(15), data);
+        pool.returnResource(jedis);
+        System.out.println("Connection test OK");
+    }
+
+    public void performBenchmark(int type) throws InterruptedException {
         executor.pause();
-        for (int i = 0; i < noOps_; i++)
-        {
-            executor.submit(new SetTask(shutDownLatch));
+        for (int i = 0; i < numberOfOperations; i++) {
+            executor.submit(new RedisOperationTask(shutDownLatch, type));
         }
         long startTime = System.nanoTime();
         executor.resume();
@@ -77,36 +94,67 @@ public class Benchmark
         totalNanoRunTime = System.nanoTime() - startTime;
     }
 
-    public void printStats()
-    {
-        List<Long> points = new ArrayList<Long>();
+    public void printStats() {
+        List<Long> points = new ArrayList<>();
         setRunTimes.drainTo(points);
         Collections.sort(points);
         long sum = 0;
-        for (Long l : points)
-        {
+        for (Long l : points) {
             sum += l;
         }
         System.out.println("Data size :" + data.length());
         System.out.println("Threads : " + executor.getMaximumPoolSize());
         System.out.println("Time Test Ran for (ms) : " + TimeUnit.NANOSECONDS.toMillis(totalNanoRunTime));
-        System.out.println("Average : " + TimeUnit.NANOSECONDS.toMillis(sum / points.size()));
-        System.out.println("50 % <=" + TimeUnit.NANOSECONDS.toMillis(points.get((points.size() / 2) - 1)));
-        System.out.println("90 % <=" + TimeUnit.NANOSECONDS.toMillis(points.get((points.size() * 90 / 100) - 1)));
-        System.out.println("95 % <=" + TimeUnit.NANOSECONDS.toMillis(points.get((points.size() * 95 / 100) - 1)));
-        System.out.println("99 % <=" + TimeUnit.NANOSECONDS.toMillis(points.get((points.size() * 99 / 100) - 1)));
-        System.out.println("99.9 % <=" + TimeUnit.NANOSECONDS.toMillis(points.get((points.size() * 999 / 1000) - 1)));
-        System.out.println("100 % <=" + TimeUnit.NANOSECONDS.toMillis(points.get(points.size() - 1)));
-        System.out.println((noOps_ * 1000 / TimeUnit.NANOSECONDS.toMillis(totalNanoRunTime)) + " Operations per second");
+        System.out.println("Average : " + TimeUnit.NANOSECONDS.toMicros(sum / points.size()));
+        System.out.println("50 % <=" + TimeUnit.NANOSECONDS.toMicros(points.get((points.size() / 2) - 1)));
+        System.out.println("90 % <=" + TimeUnit.NANOSECONDS.toMicros(points.get((points.size() * 90 / 100) - 1)));
+        System.out.println("95 % <=" + TimeUnit.NANOSECONDS.toMicros(points.get((points.size() * 95 / 100) - 1)));
+        System.out.println("99 % <=" + TimeUnit.NANOSECONDS.toMicros(points.get((points.size() * 99 / 100) - 1)));
+        System.out.println("99.9 % <=" + TimeUnit.NANOSECONDS.toMicros(points.get((points.size() * 999 / 1000) - 1)));
+        System.out.println("100 % <=" + TimeUnit.NANOSECONDS.toMicros(points.get(points.size() - 1)));
+        System.out.println((numberOfOperations * 1000 / TimeUnit.NANOSECONDS.toMillis(totalNanoRunTime)) + " Operations per sec");
     }
 
-    public static void main(String[] args) throws InterruptedException
-    {
-        CommandLineArgs cla = new CommandLineArgs();
-        new JCommander(cla, args);
-        Benchmark benchmark = new Benchmark(cla.noOps, cla.noThreads, cla.noConnections, cla.host, cla.port, cla.dataSize);
-        benchmark.performBenchmark();
-        benchmark.printStats();
+    class RedisOperationTask implements Runnable {
+        private CountDownLatch latch;
+        private int type;
+
+        RedisOperationTask(CountDownLatch latch, int type) {
+            this.latch = latch;
+            this.type = type;
+        }
+
+        public void run() {
+
+            Jedis jedis = pool.getResource();
+            if (!auth.isEmpty()) {
+                jedis.auth(auth);
+            }
+
+
+            Long startTime;
+            if (type == 0) {
+                String random = RandomStringUtils.random(15);
+                try {
+
+                    queue.put(random);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+                startTime = System.nanoTime();
+                jedis.set(random, data);
+            } else {
+                String key = queue.poll();
+                startTime = System.nanoTime();
+                jedis.get(key);
+            }
+            if (!setRunTimes.offer(System.nanoTime() - startTime)) {
+                System.out.println("Error. Could not add to run time queue a new time");
+            }
+            System.out.print("\r" + (System.nanoTime() - startTime) / 1000);
+            pool.returnResource(jedis);
+            latch.countDown();
+        }
     }
 
 
