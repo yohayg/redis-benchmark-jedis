@@ -2,6 +2,7 @@ package in.sheki.jedis.benchmark;
 
 import com.beust.jcommander.JCommander;
 import me.tongfei.progressbar.ProgressBar;
+import me.tongfei.progressbar.ProgressBarStyle;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.Jedis;
@@ -47,7 +48,7 @@ public class Benchmark {
         }
         this.data = RandomStringUtils.random(dataSize);
         shutDownLatch = new CountDownLatch(noOps);
-        progressBar = new ProgressBar("Operations", numberOfOperations);
+        progressBar = new ProgressBar("Operations", numberOfOperations, ProgressBarStyle.ASCII);
 
 
     }
