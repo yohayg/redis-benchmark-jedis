@@ -19,6 +19,8 @@ public class CommandLineArgs {
     public Integer port = 6379;
     @Parameter(names = "-s", description = "data size in bytes")
     public Integer dataSize = 100;
+    @Parameter(names = "-b", description = "No. of bulk operations")
+    public Integer bulkOps = 1;
     @Parameter(names = "-sentinel", description = "use sentinel pool")
     public Integer sentinel = 0;
     @Parameter(names = "-a", description = "Authentication")

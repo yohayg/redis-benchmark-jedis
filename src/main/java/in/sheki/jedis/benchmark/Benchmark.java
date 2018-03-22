@@ -23,17 +23,19 @@ public class Benchmark {
     private final String auth;
     private final String data;
     private final CountDownLatch shutDownLatch;
+    private final ProgressBar progressBar;
     private PausableThreadPoolExecutor executor;
     private BlockingQueue<String> queue;
     private long totalNanoRunTime;
-    private final ProgressBar progressBar;
+    private final int bulkOps;
 
-    public Benchmark(final int noOps, final int noThreads, final int noJedisConn, final String host, final int port, int dataSize, int sentinel, String auth, BlockingQueue<String> queue) {
+    public Benchmark(final int noOps, final int noThreads, final int noJedisConn, final String host, final int port, int dataSize, int sentinel, String auth, BlockingQueue<String> queue, int bulkOps) {
         this.auth = auth;
         this.numberOfOperations = noOps;
         setRunTimes = new ArrayBlockingQueue<>(noOps);
         this.executor = new PausableThreadPoolExecutor(noThreads, noThreads, 5, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
         this.queue = queue;
+        this.bulkOps = bulkOps;
 
         if (sentinel == 0) {
             final GenericObjectPoolConfig poolConfig = new GenericObjectPoolConfig();
@@ -68,7 +70,7 @@ public class Benchmark {
     }
 
     private static void start(CommandLineArgs cla, int type, BlockingQueue<String> queue) throws InterruptedException {
-        Benchmark benchmark = new Benchmark(cla.noOps, cla.noThreads, cla.noConnections, cla.host, cla.port, cla.dataSize, cla.sentinel, cla.auth, queue);
+        Benchmark benchmark = new Benchmark(cla.noOps, cla.noThreads, cla.noConnections, cla.host, cla.port, cla.dataSize, cla.sentinel, cla.auth, queue,cla.bulkOps);
         benchmark.test();
         System.out.println("In progress");
         benchmark.performBenchmark(type);
@@ -91,7 +93,7 @@ public class Benchmark {
         progressBar.start();
         executor.pause();
         for (int i = 0; i < numberOfOperations; i++) {
-            executor.submit(new RedisOperationTask(shutDownLatch, type));
+            executor.submit(new RedisOperationTask(shutDownLatch, type,bulkOps));
         }
         long startTime = System.nanoTime();
         executor.resume();
@@ -125,10 +127,12 @@ public class Benchmark {
     class RedisOperationTask implements Runnable {
         private CountDownLatch latch;
         private int type;
+        private int bulkOps;
 
-        RedisOperationTask(CountDownLatch latch, int type) {
+        RedisOperationTask(CountDownLatch latch, int type,int bulkOps) {
             this.latch = latch;
             this.type = type;
+            this.bulkOps = bulkOps;
         }
 
         public void run() {
@@ -141,15 +145,23 @@ public class Benchmark {
 
             Long startTime;
             if (type == 0) {
-                String random = RandomStringUtils.random(15);
-                try {
+                List<String> randoms = new ArrayList<>(3);
+                for (int i = 0; i < bulkOps; i++) {
+                    String random = RandomStringUtils.random(15);
+                    try {
 
-                    queue.put(random);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
+                        randoms.add(random);
+                        queue.put(random);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
                 }
                 startTime = System.nanoTime();
-                jedis.set(random, data);
+                for (String random : randoms) {
+                    jedis.set(random, data);
+                }
+
+
             } else {
                 String key = queue.poll();
                 startTime = System.nanoTime();
