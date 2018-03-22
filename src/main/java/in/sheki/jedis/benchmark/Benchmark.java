@@ -1,6 +1,7 @@
 package in.sheki.jedis.benchmark;
 
 import com.beust.jcommander.JCommander;
+import me.tongfei.progressbar.ProgressBar;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.pool2.impl.GenericObjectPoolConfig;
 import redis.clients.jedis.Jedis;
@@ -24,6 +25,7 @@ public class Benchmark {
     private PausableThreadPoolExecutor executor;
     private BlockingQueue<String> queue;
     private long totalNanoRunTime;
+    private final ProgressBar progressBar;
 
     public Benchmark(final int noOps, final int noThreads, final int noJedisConn, final String host, final int port, int dataSize, int sentinel, String auth, BlockingQueue<String> queue) {
         this.auth = auth;
@@ -45,6 +47,8 @@ public class Benchmark {
         }
         this.data = RandomStringUtils.random(dataSize);
         shutDownLatch = new CountDownLatch(noOps);
+        progressBar = new ProgressBar("Operations", numberOfOperations);
+
 
     }
 
@@ -83,6 +87,7 @@ public class Benchmark {
     }
 
     public void performBenchmark(int type) throws InterruptedException {
+        progressBar.start();
         executor.pause();
         for (int i = 0; i < numberOfOperations; i++) {
             executor.submit(new RedisOperationTask(shutDownLatch, type));
@@ -92,6 +97,7 @@ public class Benchmark {
         executor.shutdown();
         shutDownLatch.await();
         totalNanoRunTime = System.nanoTime() - startTime;
+        progressBar.stop();
     }
 
     public void printStats() {
@@ -151,7 +157,8 @@ public class Benchmark {
             if (!setRunTimes.offer(System.nanoTime() - startTime)) {
                 System.out.println("Error. Could not add to run time queue a new time");
             }
-            System.out.print("\r" + (System.nanoTime() - startTime) / 1000);
+//            System.out.print("\r" + (System.nanoTime() - startTime) / 1000);
+            progressBar.step();
             pool.returnResource(jedis);
             latch.countDown();
         }
